@@ -30,7 +30,7 @@ fn main() {
             EguiPlugin { enable_multipass_for_primary_context: true },
         ))
         .init_resource::<SunAngles>()
-        .add_systems(Startup, (setup_camera_fog, setup_terrain_scene))
+        .add_systems(Startup, (setup_camera_fog, setup_terrain_scene, setup_egui_cjk_font))
         .add_systems(EguiContextPass, sun_angles_ui)
         .add_systems(Update, (
             apply_sun_angles,
@@ -160,6 +160,32 @@ fn apply_sun_angles(angles: Res<SunAngles>, mut suns: Query<&mut Transform, With
     let distance = 1.0;
     tf.translation = -dir * distance;
     tf.look_at(Vec3::ZERO, Vec3::Y);
+}
+
+fn setup_egui_cjk_font(mut contexts: EguiContexts) {
+    let mut fonts = egui::FontDefinitions::default();
+
+    // Embed the CJK-capable font at compile time to ensure availability in all targets (incl. WASM)
+    let font_name = "cjk_font:NotoSansSC.ttf".to_string();
+    let font_bytes: &'static [u8] = include_bytes!("../assets/fonts/NotoSansSC.ttf");
+
+    fonts
+        .font_data
+        .insert(font_name.clone(), std::sync::Arc::new(egui::FontData::from_owned(font_bytes.to_vec())));
+
+    // Put our CJK font at the front of the fallback list for both families
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, font_name.clone());
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, font_name);
+
+    contexts.ctx_mut().set_fonts(fonts);
 }
 
 // --- Editor-style free fly camera ---
