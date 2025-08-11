@@ -15,6 +15,18 @@ use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
 use bevy::window::{PrimaryWindow, Window, WindowPlugin};
 use rand::Rng;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiContextPass};
+use image::RgbaImage;
+#[cfg(target_arch = "wasm32")]
+use rfd::AsyncFileDialog;
+#[cfg(not(target_arch = "wasm32"))]
+use rfd::FileDialog;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
+#[cfg(target_arch = "wasm32")]
+use std::sync::{OnceLock, Mutex};
+
+#[cfg(target_arch = "wasm32")]
+static HEIGHTMAP_QUEUE: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
 
 fn main() {
     App::new()
@@ -30,16 +42,26 @@ fn main() {
             EguiPlugin { enable_multipass_for_primary_context: true },
         ))
         .init_resource::<SunAngles>()
+        .init_resource::<HeightmapUiState>()
         .add_systems(Startup, (setup_camera_fog, setup_terrain_scene, setup_egui_cjk_font))
-        .add_systems(EguiContextPass, sun_angles_ui)
+        .add_systems(EguiContextPass, (sun_angles_ui, heightmap_ui))
         .add_systems(Update, (
             apply_sun_angles,
             camera_grab_pointer,
             camera_look,
             camera_move,
         ))
+        .add_systems(Startup, init_heightmap_queue_if_wasm)
         .run();
 }
+
+#[cfg(target_arch = "wasm32")]
+fn init_heightmap_queue_if_wasm() {
+    let _ = HEIGHTMAP_QUEUE.get_or_init(|| Mutex::new(Vec::new()));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn init_heightmap_queue_if_wasm() {}
 
 fn setup_camera_fog(mut commands: Commands) {
     commands.spawn((
@@ -316,6 +338,178 @@ fn camera_move(
         .normalize();
 
     transform.translation += world_dir * speed * time.delta_secs();
+}
+
+// --- Heightmap import via egui ---
+#[derive(Resource)]
+struct HeightmapUiState {
+    size_x: f32,
+    size_z: f32,
+    height_scale: f32,
+    last_status: Option<String>,
+}
+
+impl Default for HeightmapUiState {
+    fn default() -> Self {
+        Self {
+            size_x: 10.0,
+            size_z: 10.0,
+            height_scale: 10.0,
+            last_status: None,
+        }
+    }
+}
+
+fn heightmap_ui(
+    mut contexts: EguiContexts,
+    mut state: ResMut<HeightmapUiState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut terrain_q: Query<&mut Mesh3d, With<Terrain>>,
+) {
+    egui::Window::new("高度图").show(contexts.ctx_mut(), |ui| {
+        ui.label("导入 RGBA PNG 高度图，仅使用 R/G 通道 (0..65535)，R=低8位，G=高8位");
+        ui.add(egui::Slider::new(&mut state.size_x, 0.001..=1000.0).text("尺寸X"));
+        ui.add(egui::Slider::new(&mut state.size_z, 0.001..=1000.0).text("尺寸Z"));
+        ui.add(egui::Slider::new(&mut state.height_scale, 0.001..=1000.0).text("高度缩放"));
+
+        // Poll async-loaded bytes on wasm
+        #[cfg(target_arch = "wasm32")]
+        if let Some(queue) = HEIGHTMAP_QUEUE.get() {
+            if let Ok(mut q) = queue.lock() {
+                if let Some(bytes) = q.pop() {
+                    match image::load_from_memory(&bytes).ok().map(|img| img.to_rgba8()) {
+                        Some(rgba) => {
+                            let mesh = generate_mesh_from_rg_heightmap(&rgba, state.size_x, state.size_z, state.height_scale);
+                            let new_handle = meshes.add(mesh);
+                            if let Ok(mut mesh3d) = terrain_q.single_mut() {
+                                *mesh3d = Mesh3d(new_handle);
+                                state.last_status = Some(format!(
+                                    "(WASM) 已载入: {}x{}，替换地形网格", rgba.width(), rgba.height()
+                                ));
+                            } else {
+                                state.last_status = Some("未找到 Terrain 实体".to_string());
+                            }
+                        }
+                        None => {
+                            state.last_status = Some("(WASM) 解析 PNG 失败".to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        if ui.button("导入PNG高度图...").clicked() {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if let Some(path) = FileDialog::new().add_filter("PNG", &["png"]).pick_file() {
+                    match std::fs::read(&path)
+                        .ok()
+                        .and_then(|bytes| image::load_from_memory(&bytes).ok())
+                        .map(|dyn_img| dyn_img.to_rgba8())
+                    {
+                        Some(rgba) => {
+                            let mesh = generate_mesh_from_rg_heightmap(&rgba, state.size_x, state.size_z, state.height_scale);
+                            let new_handle = meshes.add(mesh);
+                            if let Ok(mut mesh3d) = terrain_q.single_mut() {
+                                *mesh3d = Mesh3d(new_handle);
+                                state.last_status = Some(format!(
+                                    "已载入: {}x{}，替换地形网格", rgba.width(), rgba.height()
+                                ));
+                            } else {
+                                state.last_status = Some("未找到 Terrain 实体".to_string());
+                            }
+                        }
+                        None => {
+                            state.last_status = Some("读取或解析 PNG 失败".to_string());
+                        }
+                    }
+                }
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(queue) = HEIGHTMAP_QUEUE.get() {
+                    let q = queue;
+                    spawn_local(async move {
+                        if let Some(file) = AsyncFileDialog::new().add_filter("PNG", &["png"]).pick_file().await {
+                            let data = file.read().await;
+                            if let Ok(mut locked) = q.lock() {
+                                locked.push(data);
+                            }
+                        }
+                    });
+                    state.last_status = Some("(WASM) 已打开文件选择对话框".to_string());
+                } else {
+                    state.last_status = Some("(WASM) 文件队列未初始化".to_string());
+                }
+            }
+        }
+
+        if let Some(s) = &state.last_status {
+            ui.label(s);
+        }
+    });
+}
+
+fn generate_mesh_from_rg_heightmap(
+    img: &RgbaImage,
+    size_x: f32,
+    size_z: f32,
+    height_scale: f32,
+) -> Mesh {
+    let width = img.width() as usize;
+    let height = img.height() as usize;
+
+    let vertex_count = width * height;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vertex_count);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(vertex_count);
+
+    let dx = if width > 1 { size_x / (width as f32 - 1.0) } else { 0.0 };
+    let dz = if height > 1 { size_z / (height as f32 - 1.0) } else { 0.0 };
+
+    let x_origin = -size_x * 0.5;
+    let z_origin = -size_z * 0.5;
+
+    for iz in 0..height {
+        for ix in 0..width {
+            let p = img.get_pixel(ix as u32, iz as u32);
+            let r = p[0] as u16; // low 8 bits
+            let g = p[1] as u16; // high 8 bits
+            let h16: u16 = (r << 8) | g;
+            let h = ((h16 as f32) / 65535.0 - 0.5) * height_scale;
+
+            let x = x_origin + ix as f32 * dx;
+            let z = z_origin + iz as f32 * dz;
+            positions.push([x, h, z]);
+            uvs.push([
+                ix as f32 / (width as f32 - 1.0),
+                iz as f32 / (height as f32 - 1.0),
+            ]);
+        }
+    }
+
+    let quad_count_x = if width > 1 { width - 1 } else { 0 };
+    let quad_count_z = if height > 1 { height - 1 } else { 0 };
+    let mut indices: Vec<u32> = Vec::with_capacity(quad_count_x * quad_count_z * 6);
+
+    for iz in 0..quad_count_z {
+        for ix in 0..quad_count_x {
+            let i0 = (iz * width + ix) as u32;
+            let i1 = i0 + 1;
+            let i2 = i0 + width as u32;
+            let i3 = i2 + 1;
+            indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
+        }
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_indices(Indices::U32(indices));
+
+    mesh.compute_normals();
+
+    mesh
 }
 
 fn generate_random_terrain(
