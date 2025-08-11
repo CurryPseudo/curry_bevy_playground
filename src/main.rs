@@ -12,12 +12,21 @@ use bevy::render::mesh::Indices;
 use bevy::asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
-use bevy::window::PrimaryWindow;
+use bevy::window::{PrimaryWindow, Window, WindowPlugin};
 use rand::Rng;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    canvas: Some("#bevy".into()),
+                    fit_canvas_to_parent: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        ))
         .add_systems(Startup, (setup_camera_fog, setup_terrain_scene))
         .add_systems(Update, (
             dynamic_scene,
