@@ -11,45 +11,41 @@ use bevy::{
 use bevy::render::mesh::Indices;
 use bevy::asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
+use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
+use bevy::window::PrimaryWindow;
 use rand::Rng;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_camera_fog, setup_terrain_scene))
-        .add_systems(Update, dynamic_scene)
+        .add_systems(Update, (
+            dynamic_scene,
+            camera_grab_pointer,
+            camera_look,
+            camera_move,
+        ))
         .run();
 }
 
 fn setup_camera_fog(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        // HDR is required for atmospheric scattering to be properly applied to the scene
         Camera {
             hdr: true,
             ..default()
         },
         Transform::from_xyz(-1.2, 0.15, 0.0).looking_at(Vec3::Y * 0.1, Vec3::Y),
-        // This is the component that enables atmospheric scattering for a camera
         Atmosphere::EARTH,
-        // The scene is in units of 10km, so we need to scale up the
-        // aerial view lut distance and set the scene scale accordingly.
-        // Most usages of this feature will not need to adjust this.
         AtmosphereSettings {
             aerial_view_lut_max_distance: 3.2e5,
             scene_units_to_m: 1e+4,
             ..Default::default()
         },
-        // The directional light illuminance  used in this scene
-        // (the one recommended for use with this feature) is
-        // quite bright, so raising the exposure compensation helps
-        // bring the scene to a nicer brightness range.
         Exposure::SUNLIGHT,
-        // Tonemapper chosen just because it looked good with the scene, any
-        // tonemapper would be fine :)
         Tonemapping::AcesFitted,
-        // Bloom gives the sun a much more natural look.
         Bloom::NATURAL,
+        EditorCameraController::default(),
     ));
 }
 
@@ -61,7 +57,6 @@ fn setup_terrain_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Configure a properly scaled cascade shadow map for this scene (defaults are too large, mesh units are in km)
     let cascade_shadow_config = CascadeShadowConfigBuilder {
         first_cascade_far_bound: 0.3,
         maximum_distance: 3.0,
@@ -69,15 +64,9 @@ fn setup_terrain_scene(
     }
     .build();
 
-    // Sun
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
-            // lux::RAW_SUNLIGHT is recommended for use with this feature, since
-            // other values approximate sunlight *post-scattering* in various
-            // conditions. RAW_SUNLIGHT in comparison is the illuminance of the
-            // sun unfiltered by the atmosphere, so it is the proper input for
-            // sunlight to be filtered by the atmosphere.
             illuminance: lux::RAW_SUNLIGHT,
             ..default()
         },
@@ -87,7 +76,6 @@ fn setup_terrain_scene(
 
     let sphere_mesh = meshes.add(Mesh::from(Sphere { radius: 1.0 }));
 
-    // light probe spheres
     commands.spawn((
         Mesh3d(sphere_mesh.clone()),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -110,7 +98,6 @@ fn setup_terrain_scene(
         Transform::from_xyz(-0.3, 0.1, 0.1).with_scale(Vec3::splat(0.05)),
     ));
 
-    // Terrain (generated at runtime)
     let terrain_mesh = generate_random_terrain(128, 128, 4.0, 4.0, 0.25);
     let terrain_handle = meshes.add(terrain_mesh);
 
@@ -132,6 +119,127 @@ fn setup_terrain_scene(
 fn dynamic_scene(mut suns: Query<&mut Transform, With<DirectionalLight>>, time: Res<Time>) {
     suns.iter_mut()
         .for_each(|mut tf| tf.rotate_x(-time.delta_secs() * PI / 10.0));
+}
+
+// --- Editor-style free fly camera ---
+#[derive(Component)]
+struct EditorCameraController {
+    yaw_radians: f32,
+    pitch_radians: f32,
+    base_speed_units_per_second: f32,
+    mouse_sensitivity_radians_per_pixel: f32,
+}
+
+impl Default for EditorCameraController {
+    fn default() -> Self {
+        Self {
+            yaw_radians: 0.0,
+            pitch_radians: 0.0,
+            base_speed_units_per_second: 2.0,
+            mouse_sensitivity_radians_per_pixel: 0.0025,
+        }
+    }
+}
+
+fn camera_grab_pointer(
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut window_q: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    let Ok(mut window) = window_q.single_mut() else { return; };
+    let want_lock = mouse_buttons.pressed(MouseButton::Right);
+    use bevy::window::CursorGrabMode;
+    if want_lock {
+        if window.cursor_options.grab_mode != CursorGrabMode::Locked {
+            window.cursor_options.grab_mode = CursorGrabMode::Locked;
+        }
+        if window.cursor_options.visible {
+            window.cursor_options.visible = false;
+        }
+    } else {
+        if window.cursor_options.grab_mode != CursorGrabMode::None {
+            window.cursor_options.grab_mode = CursorGrabMode::None;
+        }
+        if !window.cursor_options.visible {
+            window.cursor_options.visible = true;
+        }
+    }
+}
+
+fn camera_look(
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut query: Query<&mut EditorCameraController, With<Camera3d>>, 
+    mut xform_q: Query<&mut Transform, With<Camera3d>>,
+) {
+    if !mouse_buttons.pressed(MouseButton::Right) { return; }
+    let Ok(mut controller) = query.single_mut() else { return; };
+    let Ok(mut transform) = xform_q.single_mut() else { return; };
+
+    let mut delta = Vec2::ZERO;
+    for ev in mouse_motion_events.read() { delta += ev.delta; }
+    if delta == Vec2::ZERO { return; }
+
+    controller.yaw_radians -= delta.x * controller.mouse_sensitivity_radians_per_pixel;
+    controller.pitch_radians -= delta.y * controller.mouse_sensitivity_radians_per_pixel;
+
+    let half_pi = PI * 0.5 - 0.001;
+    controller.pitch_radians = controller.pitch_radians.clamp(-half_pi, half_pi);
+
+    let yaw = Quat::from_rotation_y(controller.yaw_radians);
+    let pitch = Quat::from_rotation_x(controller.pitch_radians);
+    transform.rotation = yaw * pitch;
+}
+
+fn camera_move(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut controller_q: Query<&mut EditorCameraController, With<Camera3d>>,
+    mut transform_q: Query<&mut Transform, With<Camera3d>>,
+    mut wheel_events: EventReader<MouseWheel>,
+) {
+    let Ok(mut controller) = controller_q.single_mut() else { return; };
+    let Ok(mut transform) = transform_q.single_mut() else { return; };
+
+    // Adjust and persist base speed with mouse wheel
+    let mut base_speed = controller.base_speed_units_per_second;
+    for ev in wheel_events.read() {
+        let scroll = match ev.unit {
+            MouseScrollUnit::Line => ev.y,
+            MouseScrollUnit::Pixel => ev.y * 0.05,
+        };
+        base_speed = (base_speed * (1.0 + scroll * 0.1)).max(0.01);
+    }
+    controller.base_speed_units_per_second = base_speed;
+
+    // Modifiers
+    let mut speed = base_speed;
+    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        speed *= 5.0;
+    }
+    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+        speed *= 0.2;
+    }
+
+    // Movement input
+    let mut input_direction = Vec3::ZERO;
+    if keys.pressed(KeyCode::KeyW) { input_direction += Vec3::Z; }
+    if keys.pressed(KeyCode::KeyS) { input_direction += -Vec3::Z; }
+    if keys.pressed(KeyCode::KeyA) { input_direction += -Vec3::X; }
+    if keys.pressed(KeyCode::KeyD) { input_direction += Vec3::X; }
+    if keys.pressed(KeyCode::KeyE) || keys.pressed(KeyCode::Space) { input_direction += Vec3::Y; }
+    if keys.pressed(KeyCode::KeyQ) { input_direction += -Vec3::Y; }
+
+    if input_direction == Vec3::ZERO { return; }
+
+    let forward = transform.forward();
+    let right = transform.right();
+    let up = Vec3::Y;
+    let world_dir = (forward * input_direction.z
+        + right * input_direction.x
+        + up * input_direction.y)
+        .normalize();
+
+    transform.translation += world_dir * speed * time.delta_secs();
 }
 
 fn generate_random_terrain(
