@@ -14,6 +14,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
 use bevy::window::{PrimaryWindow, Window, WindowPlugin};
 use rand::Rng;
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiContextPass};
 
 fn main() {
     App::new()
@@ -26,10 +27,13 @@ fn main() {
                 }),
                 ..Default::default()
             }),
+            EguiPlugin { enable_multipass_for_primary_context: true },
         ))
+        .init_resource::<SunAngles>()
         .add_systems(Startup, (setup_camera_fog, setup_terrain_scene))
+        .add_systems(EguiContextPass, sun_angles_ui)
         .add_systems(Update, (
-            dynamic_scene,
+            apply_sun_angles,
             camera_grab_pointer,
             camera_look,
             camera_move,
@@ -125,9 +129,37 @@ fn setup_terrain_scene(
     ));
 }
 
-fn dynamic_scene(mut suns: Query<&mut Transform, With<DirectionalLight>>, time: Res<Time>) {
-    suns.iter_mut()
-        .for_each(|mut tf| tf.rotate_x(-time.delta_secs() * PI / 10.0));
+// --- Sun control ---
+#[derive(Resource)]
+struct SunAngles {
+    // degrees
+    azimuth_deg: f32,   // 0..=360, measured from +X towards +Z
+    elevation_deg: f32, // -90..=90
+}
+
+impl Default for SunAngles {
+    fn default() -> Self {
+        Self { azimuth_deg: 0.0, elevation_deg: -30.0 }
+    }
+}
+
+fn sun_angles_ui(mut contexts: EguiContexts, mut angles: ResMut<SunAngles>) {
+    egui::Window::new("天光设置").show(contexts.ctx_mut(), |ui| {
+        ui.label("使用滑块调整方向光角度");
+        ui.add(egui::Slider::new(&mut angles.azimuth_deg, 0.0..=360.0).text("方位角(°)"));
+        ui.add(egui::Slider::new(&mut angles.elevation_deg, -90.0..=89.0).text("仰角(°)"));
+    });
+}
+
+fn apply_sun_angles(angles: Res<SunAngles>, mut suns: Query<&mut Transform, With<DirectionalLight>>) {
+    let Ok(mut tf) = suns.single_mut() else { return; };
+    let az = angles.azimuth_deg.to_radians();
+    let el = angles.elevation_deg.to_radians();
+    let dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin());
+
+    let distance = 1.0;
+    tf.translation = -dir * distance;
+    tf.look_at(Vec3::ZERO, Vec3::Y);
 }
 
 // --- Editor-style free fly camera ---
@@ -153,8 +185,11 @@ impl Default for EditorCameraController {
 fn camera_grab_pointer(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
+    mut contexts: EguiContexts,
 ) {
     let Ok(mut window) = window_q.single_mut() else { return; };
+    let ctx = contexts.ctx_mut();
+    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
     let want_lock = mouse_buttons.pressed(MouseButton::Right);
     use bevy::window::CursorGrabMode;
     if want_lock {
@@ -179,8 +214,11 @@ fn camera_look(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut query: Query<&mut EditorCameraController, With<Camera3d>>, 
     mut xform_q: Query<&mut Transform, With<Camera3d>>,
+    mut contexts: EguiContexts,
 ) {
     if !mouse_buttons.pressed(MouseButton::Right) { return; }
+    let ctx = contexts.ctx_mut();
+    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
     let Ok(mut controller) = query.single_mut() else { return; };
     let Ok(mut transform) = xform_q.single_mut() else { return; };
 
@@ -205,7 +243,10 @@ fn camera_move(
     mut controller_q: Query<&mut EditorCameraController, With<Camera3d>>,
     mut transform_q: Query<&mut Transform, With<Camera3d>>,
     mut wheel_events: EventReader<MouseWheel>,
+    mut contexts: EguiContexts,
 ) {
+    let ctx = contexts.ctx_mut();
+    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
     let Ok(mut controller) = controller_q.single_mut() else { return; };
     let Ok(mut transform) = transform_q.single_mut() else { return; };
 
