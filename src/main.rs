@@ -211,7 +211,6 @@ fn setup_egui_cjk_font(mut contexts: EguiContexts) {
         .or_default()
         .insert(0, font_name);
 
-    log::info!("Setting fonts {:?}", fonts);
     ctx.set_fonts(fonts);
 }
 
