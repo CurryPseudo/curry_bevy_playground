@@ -14,7 +14,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
 use bevy::window::{PrimaryWindow, Window, WindowPlugin};
 use rand::Rng;
-use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiContextPass};
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 use image::RgbaImage;
 #[cfg(target_arch = "wasm32")]
 use rfd::AsyncFileDialog;
@@ -39,12 +39,12 @@ fn main() {
                 }),
                 ..Default::default()
             }),
-            EguiPlugin { enable_multipass_for_primary_context: true },
+            EguiPlugin::default(),
         ))
         .init_resource::<SunAngles>()
         .init_resource::<HeightmapUiState>()
         .add_systems(Startup, (setup_camera_fog, setup_terrain_scene, setup_egui_cjk_font))
-        .add_systems(EguiContextPass, (sun_angles_ui, heightmap_ui))
+        .add_systems(EguiPrimaryContextPass, (sun_angles_ui, heightmap_ui))
         .add_systems(Update, (
             apply_sun_angles,
             camera_grab_pointer,
@@ -166,7 +166,8 @@ impl Default for SunAngles {
 }
 
 fn sun_angles_ui(mut contexts: EguiContexts, mut angles: ResMut<SunAngles>) {
-    egui::Window::new("天光设置").show(contexts.ctx_mut(), |ui| {
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    egui::Window::new("天光设置").show(ctx, |ui| {
         ui.label("使用滑块调整方向光角度");
         ui.add(egui::Slider::new(&mut angles.azimuth_deg, 0.0..=360.0).text("方位角(°)"));
         ui.add(egui::Slider::new(&mut angles.elevation_deg, -90.0..=89.0).text("仰角(°)"));
@@ -207,7 +208,9 @@ fn setup_egui_cjk_font(mut contexts: EguiContexts) {
         .or_default()
         .insert(0, font_name);
 
-    contexts.ctx_mut().set_fonts(fonts);
+    if let Ok(ctx) = contexts.ctx_mut() {
+        ctx.set_fonts(fonts);
+    }
 }
 
 // --- Editor-style free fly camera ---
@@ -236,7 +239,7 @@ fn camera_grab_pointer(
     mut contexts: EguiContexts,
 ) {
     let Ok(mut window) = window_q.single_mut() else { return; };
-    let ctx = contexts.ctx_mut();
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
     if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
     let want_lock = mouse_buttons.pressed(MouseButton::Right);
     use bevy::window::CursorGrabMode;
@@ -265,7 +268,7 @@ fn camera_look(
     mut contexts: EguiContexts,
 ) {
     if !mouse_buttons.pressed(MouseButton::Right) { return; }
-    let ctx = contexts.ctx_mut();
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
     if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
     let Ok(mut controller) = query.single_mut() else { return; };
     let Ok(mut transform) = xform_q.single_mut() else { return; };
@@ -293,7 +296,7 @@ fn camera_move(
     mut wheel_events: EventReader<MouseWheel>,
     mut contexts: EguiContexts,
 ) {
-    let ctx = contexts.ctx_mut();
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
     if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
     let Ok(mut controller) = controller_q.single_mut() else { return; };
     let Ok(mut transform) = transform_q.single_mut() else { return; };
@@ -366,7 +369,8 @@ fn heightmap_ui(
     mut meshes: ResMut<Assets<Mesh>>,
     mut terrain_q: Query<&mut Mesh3d, With<Terrain>>,
 ) {
-    egui::Window::new("高度图").show(contexts.ctx_mut(), |ui| {
+    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    egui::Window::new("高度图").show(ctx, |ui| {
         ui.label("导入 RGBA PNG 高度图，仅使用 R/G 通道 (0..65535)，R=低8位，G=高8位");
         ui.add(egui::Slider::new(&mut state.size_x, 0.001..=1000.0).text("尺寸X"));
         ui.add(egui::Slider::new(&mut state.size_z, 0.001..=1000.0).text("尺寸Z"));
