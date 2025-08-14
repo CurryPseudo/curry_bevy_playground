@@ -14,7 +14,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
 use bevy::window::{PrimaryWindow, Window, WindowPlugin};
 use rand::Rng;
-use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet};
 use image::RgbaImage;
 #[cfg(target_arch = "wasm32")]
 use rfd::AsyncFileDialog;
@@ -40,10 +40,13 @@ fn main() {
                 ..Default::default()
             }),
             EguiPlugin::default(),
+            bevy_inspector_egui::DefaultInspectorConfigPlugin,
         ))
         .init_resource::<SunAngles>()
         .init_resource::<HeightmapUiState>()
-        .add_systems(Startup, (setup_camera_fog, setup_terrain_scene, setup_egui_cjk_font))
+        .add_systems(PreStartup, setup_camera_fog.before(EguiStartupSet::InitContexts))
+        .add_systems(Startup, init_heightmap_queue_if_wasm)
+        .add_systems(Startup, (setup_egui_cjk_font, setup_terrain_scene))
         .add_systems(EguiPrimaryContextPass, (sun_angles_ui, heightmap_ui))
         .add_systems(Update, (
             apply_sun_angles,
@@ -51,7 +54,6 @@ fn main() {
             camera_look,
             camera_move,
         ))
-        .add_systems(Startup, init_heightmap_queue_if_wasm)
         .run();
 }
 
@@ -186,6 +188,7 @@ fn apply_sun_angles(angles: Res<SunAngles>, mut suns: Query<&mut Transform, With
 }
 
 fn setup_egui_cjk_font(mut contexts: EguiContexts) {
+    let ctx = contexts.ctx_mut().expect("Failed to get context");
     let mut fonts = egui::FontDefinitions::default();
 
     // Embed the CJK-capable font at compile time to ensure availability in all targets (incl. WASM)
@@ -208,9 +211,8 @@ fn setup_egui_cjk_font(mut contexts: EguiContexts) {
         .or_default()
         .insert(0, font_name);
 
-    if let Ok(ctx) = contexts.ctx_mut() {
-        ctx.set_fonts(fonts);
-    }
+    log::info!("Setting fonts {:?}", fonts);
+    ctx.set_fonts(fonts);
 }
 
 // --- Editor-style free fly camera ---
