@@ -1,5 +1,5 @@
 {
-  description = "Bevy Game development environment";
+  description = "Curry Bevy Playground development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";

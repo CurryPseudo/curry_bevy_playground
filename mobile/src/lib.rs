@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::WindowMode;
 use bevy::winit::WinitSettings;
-use bevy_game::GamePlugin; // ToDo: Replace bevy_game with your new crate name.
+use curry_bevy_playground::GamePlugin; // ToDo: Replace curry_bevy_playground with your new crate name.
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn main_rs() {
