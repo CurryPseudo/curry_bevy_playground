@@ -1,29 +1,28 @@
-
 use std::f32::consts::PI;
 
+use bevy::asset::RenderAssetUsages;
+use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::render::mesh::Indices;
+use bevy::render::render_resource::PrimitiveTopology;
+use bevy::window::{PrimaryWindow, Window};
 use bevy::{
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     pbr::{light_consts::lux, Atmosphere, AtmosphereSettings, CascadeShadowConfigBuilder},
     prelude::*,
     render::camera::Exposure,
 };
-use bevy::render::mesh::Indices;
-use bevy::asset::RenderAssetUsages;
-use bevy::render::render_resource::PrimitiveTopology;
-use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
-use bevy::window::{PrimaryWindow, Window};
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use rand::Rng;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use image::RgbaImage;
+use rand::Rng;
 #[cfg(target_arch = "wasm32")]
 use rfd::AsyncFileDialog;
 #[cfg(not(target_arch = "wasm32"))]
 use rfd::FileDialog;
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
+use std::sync::{Mutex, OnceLock};
 #[cfg(target_arch = "wasm32")]
-use std::sync::{OnceLock, Mutex};
+use wasm_bindgen_futures::spawn_local;
 
 #[cfg(target_arch = "wasm32")]
 static HEIGHTMAP_QUEUE: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
@@ -33,22 +32,25 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            EguiPlugin::default(),
-            WorldInspectorPlugin::default(),
-        ))
-        .init_resource::<SunAngles>()
-        .init_resource::<HeightmapUiState>()
-        .add_systems(PreStartup, setup_camera_fog.before(EguiStartupSet::InitContexts))
-        .add_systems(Startup, init_heightmap_queue_if_wasm)
-        .add_systems(Startup, (setup_egui_cjk_font, setup_terrain_scene))
-        .add_systems(EguiPrimaryContextPass, (sun_angles_ui, heightmap_ui))
-        .add_systems(Update, (
-            apply_sun_angles,
-            camera_grab_pointer,
-            camera_look,
-            camera_move,
-        ));
+        app.add_plugins((EguiPlugin::default(), WorldInspectorPlugin::default()))
+            .init_resource::<SunAngles>()
+            .init_resource::<HeightmapUiState>()
+            .add_systems(
+                PreStartup,
+                setup_camera_fog.before(EguiStartupSet::InitContexts),
+            )
+            .add_systems(Startup, init_heightmap_queue_if_wasm)
+            .add_systems(Startup, (setup_egui_cjk_font, setup_terrain_scene))
+            .add_systems(EguiPrimaryContextPass, (sun_angles_ui, heightmap_ui))
+            .add_systems(
+                Update,
+                (
+                    apply_sun_angles,
+                    camera_grab_pointer,
+                    camera_look,
+                    camera_move,
+                ),
+            );
     }
 }
 
@@ -158,12 +160,17 @@ struct SunAngles {
 
 impl Default for SunAngles {
     fn default() -> Self {
-        Self { azimuth_deg: 0.0, elevation_deg: -30.0 }
+        Self {
+            azimuth_deg: 0.0,
+            elevation_deg: -30.0,
+        }
     }
 }
 
 fn sun_angles_ui(mut contexts: EguiContexts, mut angles: ResMut<SunAngles>) {
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     egui::Window::new("天光设置").show(ctx, |ui| {
         ui.label("使用滑块调整方向光角度");
         ui.add(egui::Slider::new(&mut angles.azimuth_deg, 0.0..=360.0).text("方位角(°)"));
@@ -171,8 +178,13 @@ fn sun_angles_ui(mut contexts: EguiContexts, mut angles: ResMut<SunAngles>) {
     });
 }
 
-fn apply_sun_angles(angles: Res<SunAngles>, mut suns: Query<&mut Transform, With<DirectionalLight>>) {
-    let Ok(mut tf) = suns.single_mut() else { return; };
+fn apply_sun_angles(
+    angles: Res<SunAngles>,
+    mut suns: Query<&mut Transform, With<DirectionalLight>>,
+) {
+    let Ok(mut tf) = suns.single_mut() else {
+        return;
+    };
     let az = angles.azimuth_deg.to_radians();
     let el = angles.elevation_deg.to_radians();
     let dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin());
@@ -190,9 +202,10 @@ fn setup_egui_cjk_font(mut contexts: EguiContexts) {
     let font_name = "cjk_font:NotoSansSC.ttf".to_string();
     let font_bytes: &'static [u8] = include_bytes!("../assets/fonts/NotoSansSC.ttf");
 
-    fonts
-        .font_data
-        .insert(font_name.clone(), std::sync::Arc::new(egui::FontData::from_owned(font_bytes.to_vec())));
+    fonts.font_data.insert(
+        font_name.clone(),
+        std::sync::Arc::new(egui::FontData::from_owned(font_bytes.to_vec())),
+    );
 
     // Put our CJK font at the front of the fallback list for both families
     fonts
@@ -234,9 +247,15 @@ fn camera_grab_pointer(
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
     mut contexts: EguiContexts,
 ) {
-    let Ok(mut window) = window_q.single_mut() else { return; };
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
+    let Ok(mut window) = window_q.single_mut() else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() {
+        return;
+    }
     let want_lock = mouse_buttons.pressed(MouseButton::Right);
     use bevy::window::CursorGrabMode;
     if want_lock {
@@ -259,19 +278,33 @@ fn camera_grab_pointer(
 fn camera_look(
     mut mouse_motion_events: EventReader<MouseMotion>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    mut query: Query<&mut EditorCameraController, With<Camera3d>>, 
+    mut query: Query<&mut EditorCameraController, With<Camera3d>>,
     mut xform_q: Query<&mut Transform, With<Camera3d>>,
     mut contexts: EguiContexts,
 ) {
-    if !mouse_buttons.pressed(MouseButton::Right) { return; }
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
-    let Ok(mut controller) = query.single_mut() else { return; };
-    let Ok(mut transform) = xform_q.single_mut() else { return; };
+    if !mouse_buttons.pressed(MouseButton::Right) {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() {
+        return;
+    }
+    let Ok(mut controller) = query.single_mut() else {
+        return;
+    };
+    let Ok(mut transform) = xform_q.single_mut() else {
+        return;
+    };
 
     let mut delta = Vec2::ZERO;
-    for ev in mouse_motion_events.read() { delta += ev.delta; }
-    if delta == Vec2::ZERO { return; }
+    for ev in mouse_motion_events.read() {
+        delta += ev.delta;
+    }
+    if delta == Vec2::ZERO {
+        return;
+    }
 
     controller.yaw_radians -= delta.x * controller.mouse_sensitivity_radians_per_pixel;
     controller.pitch_radians -= delta.y * controller.mouse_sensitivity_radians_per_pixel;
@@ -292,10 +325,18 @@ fn camera_move(
     mut wheel_events: EventReader<MouseWheel>,
     mut contexts: EguiContexts,
 ) {
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() { return; }
-    let Ok(mut controller) = controller_q.single_mut() else { return; };
-    let Ok(mut transform) = transform_q.single_mut() else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    if ctx.wants_pointer_input() || ctx.wants_keyboard_input() {
+        return;
+    }
+    let Ok(mut controller) = controller_q.single_mut() else {
+        return;
+    };
+    let Ok(mut transform) = transform_q.single_mut() else {
+        return;
+    };
 
     // Adjust and persist base speed with mouse wheel
     let mut base_speed = controller.base_speed_units_per_second;
@@ -319,22 +360,35 @@ fn camera_move(
 
     // Movement input
     let mut input_direction = Vec3::ZERO;
-    if keys.pressed(KeyCode::KeyW) { input_direction += Vec3::Z; }
-    if keys.pressed(KeyCode::KeyS) { input_direction += -Vec3::Z; }
-    if keys.pressed(KeyCode::KeyA) { input_direction += -Vec3::X; }
-    if keys.pressed(KeyCode::KeyD) { input_direction += Vec3::X; }
-    if keys.pressed(KeyCode::KeyE) || keys.pressed(KeyCode::Space) { input_direction += Vec3::Y; }
-    if keys.pressed(KeyCode::KeyQ) { input_direction += -Vec3::Y; }
+    if keys.pressed(KeyCode::KeyW) {
+        input_direction += Vec3::Z;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        input_direction += -Vec3::Z;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        input_direction += -Vec3::X;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        input_direction += Vec3::X;
+    }
+    if keys.pressed(KeyCode::KeyE) || keys.pressed(KeyCode::Space) {
+        input_direction += Vec3::Y;
+    }
+    if keys.pressed(KeyCode::KeyQ) {
+        input_direction += -Vec3::Y;
+    }
 
-    if input_direction == Vec3::ZERO { return; }
+    if input_direction == Vec3::ZERO {
+        return;
+    }
 
     let forward = transform.forward();
     let right = transform.right();
     let up = Vec3::Y;
-    let world_dir = (forward * input_direction.z
-        + right * input_direction.x
-        + up * input_direction.y)
-        .normalize();
+    let world_dir =
+        (forward * input_direction.z + right * input_direction.x + up * input_direction.y)
+            .normalize();
 
     transform.translation += world_dir * speed * time.delta_secs();
 }
@@ -365,7 +419,9 @@ fn heightmap_ui(
     mut meshes: ResMut<Assets<Mesh>>,
     mut terrain_q: Query<&mut Mesh3d, With<Terrain>>,
 ) {
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     egui::Window::new("高度图").show(ctx, |ui| {
         ui.label("导入 RGBA PNG 高度图，仅使用 R/G 通道 (0..65535)，R=低8位，G=高8位");
         ui.add(egui::Slider::new(&mut state.size_x, 0.001..=1000.0).text("尺寸X"));
@@ -377,14 +433,24 @@ fn heightmap_ui(
         if let Some(queue) = HEIGHTMAP_QUEUE.get() {
             if let Ok(mut q) = queue.lock() {
                 if let Some(bytes) = q.pop() {
-                    match image::load_from_memory(&bytes).ok().map(|img| img.to_rgba8()) {
+                    match image::load_from_memory(&bytes)
+                        .ok()
+                        .map(|img| img.to_rgba8())
+                    {
                         Some(rgba) => {
-                            let mesh = generate_mesh_from_rg_heightmap(&rgba, state.size_x, state.size_z, state.height_scale);
+                            let mesh = generate_mesh_from_rg_heightmap(
+                                &rgba,
+                                state.size_x,
+                                state.size_z,
+                                state.height_scale,
+                            );
                             let new_handle = meshes.add(mesh);
                             if let Ok(mut mesh3d) = terrain_q.single_mut() {
                                 *mesh3d = Mesh3d(new_handle);
                                 state.last_status = Some(format!(
-                                    "(WASM) 已载入: {}x{}，替换地形网格", rgba.width(), rgba.height()
+                                    "(WASM) 已载入: {}x{}，替换地形网格",
+                                    rgba.width(),
+                                    rgba.height()
                                 ));
                             } else {
                                 state.last_status = Some("未找到 Terrain 实体".to_string());
@@ -408,12 +474,19 @@ fn heightmap_ui(
                         .map(|dyn_img| dyn_img.to_rgba8())
                     {
                         Some(rgba) => {
-                            let mesh = generate_mesh_from_rg_heightmap(&rgba, state.size_x, state.size_z, state.height_scale);
+                            let mesh = generate_mesh_from_rg_heightmap(
+                                &rgba,
+                                state.size_x,
+                                state.size_z,
+                                state.height_scale,
+                            );
                             let new_handle = meshes.add(mesh);
                             if let Ok(mut mesh3d) = terrain_q.single_mut() {
                                 *mesh3d = Mesh3d(new_handle);
                                 state.last_status = Some(format!(
-                                    "已载入: {}x{}，替换地形网格", rgba.width(), rgba.height()
+                                    "已载入: {}x{}，替换地形网格",
+                                    rgba.width(),
+                                    rgba.height()
                                 ));
                             } else {
                                 state.last_status = Some("未找到 Terrain 实体".to_string());
@@ -431,7 +504,11 @@ fn heightmap_ui(
                 if let Some(queue) = HEIGHTMAP_QUEUE.get() {
                     let q = queue;
                     spawn_local(async move {
-                        if let Some(file) = AsyncFileDialog::new().add_filter("PNG", &["png"]).pick_file().await {
+                        if let Some(file) = AsyncFileDialog::new()
+                            .add_filter("PNG", &["png"])
+                            .pick_file()
+                            .await
+                        {
                             let data = file.read().await;
                             if let Ok(mut locked) = q.lock() {
                                 locked.push(data);
@@ -464,8 +541,16 @@ fn generate_mesh_from_rg_heightmap(
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vertex_count);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(vertex_count);
 
-    let dx = if width > 1 { size_x / (width as f32 - 1.0) } else { 0.0 };
-    let dz = if height > 1 { size_z / (height as f32 - 1.0) } else { 0.0 };
+    let dx = if width > 1 {
+        size_x / (width as f32 - 1.0)
+    } else {
+        0.0
+    };
+    let dz = if height > 1 {
+        size_z / (height as f32 - 1.0)
+    } else {
+        0.0
+    };
 
     let x_origin = -size_x * 0.5;
     let z_origin = -size_z * 0.5;
@@ -502,10 +587,13 @@ fn generate_mesh_from_rg_heightmap(
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(indices));
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices));
 
     mesh.compute_normals();
 
@@ -523,8 +611,16 @@ fn generate_random_terrain(
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vertex_count);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(vertex_count);
 
-    let dx = if num_x > 1 { size_x / (num_x as f32 - 1.0) } else { 0.0 };
-    let dz = if num_z > 1 { size_z / (num_z as f32 - 1.0) } else { 0.0 };
+    let dx = if num_x > 1 {
+        size_x / (num_x as f32 - 1.0)
+    } else {
+        0.0
+    };
+    let dz = if num_z > 1 {
+        size_z / (num_z as f32 - 1.0)
+    } else {
+        0.0
+    };
 
     let x_origin = -size_x * 0.5;
     let z_origin = -size_z * 0.5;
@@ -565,8 +661,7 @@ fn generate_random_terrain(
 
     let quad_count_x = num_x.saturating_sub(1);
     let quad_count_z = num_z.saturating_sub(1);
-    let mut indices: Vec<u32> =
-        Vec::with_capacity(quad_count_x * quad_count_z * 6);
+    let mut indices: Vec<u32> = Vec::with_capacity(quad_count_x * quad_count_z * 6);
 
     for iz in 0..quad_count_z {
         for ix in 0..quad_count_x {
@@ -579,10 +674,13 @@ fn generate_random_terrain(
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(indices));
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices));
 
     // Compute normals for proper PBR lighting
     mesh.compute_normals();
