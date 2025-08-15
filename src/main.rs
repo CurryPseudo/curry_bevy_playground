@@ -13,6 +13,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::input::mouse::{MouseMotion, MouseWheel, MouseScrollUnit};
 use bevy::window::{PrimaryWindow, Window, WindowPlugin};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use rand::Rng;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet};
 use image::RgbaImage;
@@ -40,7 +41,7 @@ fn main() {
                 ..Default::default()
             }),
             EguiPlugin::default(),
-            bevy_inspector_egui::DefaultInspectorConfigPlugin,
+            WorldInspectorPlugin::default(),
         ))
         .init_resource::<SunAngles>()
         .init_resource::<HeightmapUiState>()
