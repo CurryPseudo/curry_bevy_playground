@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-        <title>Bevy game</title> <!-- ToDo -->
+        <title>Curry Bevy Playground</title> <!-- ToDo -->
         
         
         
@@ -31,7 +31,7 @@
     z-index: 2;
 }
 </style>
-    <link rel="modulepreload" href="./bevy_game-213cbe618cb5dab.js" crossorigin="anonymous" integrity="sha384-pOTkS6705kAbq4lRwChShGz+zt9KLHKqMTeHE5Jy4PmkDJ6GyUGZzhzqHPyE19Pw"><link rel="preload" href="./bevy_game-213cbe618cb5dab_bg.wasm" crossorigin="anonymous" integrity="sha384-VP7vNwvUwRl+KdUT6iqsfA7tSr7/9ReqD+MS6lgABgnEEkzYXlXcNmAjamAPVUDs" as="fetch" type="application/wasm"></head>
+    <link rel="modulepreload" href="./curry_bevy_playground-e52c55dd101f3e71.js" crossorigin="anonymous" integrity="sha384-U7X4uKBf09DQpcft7ZXNCv7SAJxxZ15+2lJWiiJbM9htiy6hKiSsf7IH49/SAvGK"><link rel="preload" href="./curry_bevy_playground-e52c55dd101f3e71_bg.wasm" crossorigin="anonymous" integrity="sha384-osoN6pkB6E8cyHqCcVmpkt9PuUMxqp02FONTF8jz19MGH1zNbSm0L4dYkxtcnqd2" as="fetch" type="application/wasm"></head>
     <body>
         <script>// Insert hack to make sound autoplay on Chrome as soon as the user interacts with the tab:
 // https://developers.google.com/web/updates/2018/11/web-audio-autoplay#moving-forward
@@ -104,8 +104,8 @@
         </div>
     
 <script type="module">
-import init, * as bindings from './bevy_game-213cbe618cb5dab.js';
-const wasm = await init({ module_or_path: './bevy_game-213cbe618cb5dab_bg.wasm' });
+import init, * as bindings from './curry_bevy_playground-e52c55dd101f3e71.js';
+const wasm = await init({ module_or_path: './curry_bevy_playground-e52c55dd101f3e71_bg.wasm' });
 
 
 window.wasmBindings = bindings;
